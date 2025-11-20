@@ -4,7 +4,7 @@ import java.util.*;
 
 public class HubServer {
     public static void main(String[] args) throws IOException {
-        int port = 12345; // porta do servidor
+        int port = 8080; // porta do servidor
         ServerSocket serverSocket = new ServerSocket(port);
         System.out.println("Servidor rodando na porta " + port);
 

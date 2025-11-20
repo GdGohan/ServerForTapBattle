@@ -24,6 +24,7 @@ public class HubServer {
         try {
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+            out.println("Hello World");
 
             // Mantém a conexão aberta; o seu jogo fará a lógica
             while (true) {

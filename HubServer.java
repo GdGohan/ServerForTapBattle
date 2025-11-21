@@ -37,7 +37,6 @@ public class HubServer {
             socket.setSoTimeout(8000);
             socket.setReceiveBufferSize(256 * 1024);
             socket.setKeepAlive(true);
-            
 
             // 1) Pedido de lista de salas
             String first = in.readUTF();
@@ -72,25 +71,41 @@ public class HubServer {
 
             // 3) Controle de salas
             if (role.equals("RECEPTOR")) {
+
+                // LIMPA RECEPTOR MORTO
+                if (receptors.containsKey(roomId)) {
+                    Socket old = receptors.get(roomId);
+                    if (old == null || old.isClosed() || !old.isConnected()) {
+                        receptors.remove(roomId);
+                    }
+                }
+
+                // SE AINDA EXISTE → ROOM_EXISTS
                 if (receptors.containsKey(roomId)) {
                     out.writeUTF("ROOM_EXISTS");
                     socket.close();
                     return;
                 }
+
                 receptors.put(roomId, socket);
-            } 
+            }
             else if (role.equals("CLIENT")) {
+
+                // LIMPA CLIENTE MORTO
                 if (clients.containsKey(roomId) && clients.get(roomId).isClosed()) {
-                        clients.remove(roomId);
-                    }
-                    
+                    clients.remove(roomId);
+                }
+
+                // SE AINDA EXISTE CLIENTE VIVO → ROOM_FULL
                 if (clients.containsKey(roomId)) {
                     out.writeUTF("ROOM_FULL");
                     socket.close();
                     return;
                 }
+
+                // REGISTRA NOVO CLIENT
                 clients.put(roomId, socket);
-            } 
+            }
             else {
                 out.writeUTF("REJECT");
                 socket.close();

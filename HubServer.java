@@ -36,6 +36,8 @@ public class HubServer {
 
             socket.setSoTimeout(8000);
             socket.setReceiveBufferSize(256 * 1024);
+            socket.setKeepAlive(true);
+            
 
             // 1) Pedido de lista de salas
             String first = in.readUTF();
@@ -78,6 +80,10 @@ public class HubServer {
                 receptors.put(roomId, socket);
             } 
             else if (role.equals("CLIENT")) {
+                if (clients.containsKey(roomId) && clients.get(roomId).isClosed()) {
+                        clients.remove(roomId);
+                    }
+                    
                 if (clients.containsKey(roomId)) {
                     out.writeUTF("ROOM_FULL");
                     socket.close();

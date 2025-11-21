@@ -45,12 +45,7 @@ public class HubServer {
             socket.setSoTimeout(0); // remove timeout
 
             // 2️⃣ Lê header normal ROLE/ROOM
-            byte[] headerBuf = new byte[256];
-            int headerLen = dataIn.read(headerBuf);
-            if (headerLen <= 0) {
-                socket.close();
-                return;
-            }
+            String header = dataIn.readUTF();
 
             String header = new String(headerBuf, 0, headerLen).trim();
             String role = null;

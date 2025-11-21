@@ -7,15 +7,18 @@ public class HubServer {
     private static final ConcurrentHashMap<String, Socket> clients   = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, Socket> receptors = new ConcurrentHashMap<>();
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
         int port = 8080;
+
         System.out.println("HubServer iniciado na porta " + port);
 
-        ServerSocket server = new ServerSocket(port);
-
-        while (true) {
-            Socket socket = server.accept();
-            new Thread(() -> handle(socket)).start();
+        try (ServerSocket server = new ServerSocket(port)) {
+            while (true) {
+                Socket socket = server.accept();
+                new Thread(() -> handle(socket)).start();
+            }
+        } catch (IOException e) {
+            System.out.println("Erro no servidor: " + e.getMessage());
         }
     }
 
@@ -24,66 +27,76 @@ public class HubServer {
         String room = null;
 
         try {
-            socket.setSoTimeout(30000);
+            socket.setSoTimeout(30000);   // timeout de leitura
             socket.setKeepAlive(true);
             socket.setTcpNoDelay(true);
 
-            DataInputStream in = new DataInputStream(socket.getInputStream());
+            DataInputStream in  = new DataInputStream(socket.getInputStream());
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
 
-            // Handshake
+            // 1 - Handshake
             String command = in.readUTF();
-            String[] parts = command.split(";");
 
-            for (String p : parts) {
-                if (p.startsWith("ROLE:")) role = p.substring(5);
-                if (p.startsWith("ROOM:")) room = p.substring(5);
+            String[] parts = command.split(";");
+            for (String part : parts) {
+                if (part.startsWith("ROLE:")) role = part.substring(5);
+                if (part.startsWith("ROOM:")) room = part.substring(5);
             }
 
             if (role == null || room == null) {
                 out.writeUTF("REJECT");
-                socket.close();
                 return;
             }
 
-            if (role.equals("RECEPTOR")) {
+            // 2 - Registro
+            if ("RECEPTOR".equals(role)) {
 
                 Socket old = receptors.get(room);
                 if (old != null && old.isConnected() && !old.isClosed()) {
                     out.writeUTF("ROOM_EXISTS");
-                    socket.close();
                     return;
                 }
 
                 receptors.put(room, socket);
-            }
-            else if (role.equals("CLIENT")) {
+
+            } else if ("CLIENT".equals(role)) {
 
                 Socket old = clients.get(room);
                 if (old != null && old.isConnected() && !old.isClosed()) {
                     out.writeUTF("ROOM_FULL");
-                    socket.close();
                     return;
                 }
 
                 clients.put(room, socket);
-            }
-            else {
+
+            } else {
                 out.writeUTF("REJECT");
-                socket.close();
                 return;
             }
 
+            // 3 - Espera o par se conectar
             Socket other = role.equals("CLIENT")
                     ? receptors.get(room)
                     : clients.get(room);
 
-            out.writeUTF(other != null ? "ACCEPT" : "WAIT");
+            while (other == null || other.isClosed()) {
+
+                out.writeUTF("WAIT");
+                out.flush();
+
+                Thread.sleep(500);
+
+                other = role.equals("CLIENT")
+                        ? receptors.get(room)
+                        : clients.get(room);
+            }
+
+            out.writeUTF("ACCEPT");
             out.flush();
 
-            // Ponte de bytes
-            InputStream rawIn = socket.getInputStream();
+            // 4 - Ponte de bytes (modo bruto)
             byte[] buffer = new byte[4096];
+            InputStream rawIn = socket.getInputStream();
             int len;
 
             while ((len = rawIn.read(buffer)) != -1) {
@@ -99,8 +112,8 @@ public class HubServer {
                 }
             }
 
-        } catch (IOException e) {
-            System.out.println("Conexão encerrada: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println("Erro conexão [" + role + "] sala [" + room + "]: " + e.getMessage());
         } finally {
             cleanup(socket, role, room);
         }
@@ -109,12 +122,10 @@ public class HubServer {
     private static void cleanup(Socket socket, String role, String room) {
 
         if (room != null && role != null) {
-
-            if (role.equals("CLIENT")) {
+            if ("CLIENT".equals(role)) {
                 clients.remove(room);
             }
-
-            if (role.equals("RECEPTOR")) {
+            if ("RECEPTOR".equals(role)) {
                 receptors.remove(room);
             }
         }
@@ -123,6 +134,6 @@ public class HubServer {
             if (socket != null) socket.close();
         } catch (IOException ignored) {}
 
-        System.out.println("Socket removido -> " + role + " | Sala: " + room);
+        System.out.println("Desconectado -> " + role + " | Sala: " + room);
     }
 }

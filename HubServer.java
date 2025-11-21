@@ -124,7 +124,6 @@ public class HubServer {
             byte[] buffer = new byte[4096];
             int count;
 
-            long lastPing = System.currentTimeMillis();
             while ((count = in.read(buffer)) != -1) {
                 Socket target = role.equals("CLIENT")
                         ? receptors.get(roomId)
@@ -134,11 +133,6 @@ public class HubServer {
                     OutputStream targetOut = target.getOutputStream();
                     targetOut.write(buffer, 0, count);
                     targetOut.flush();
-                }
-                if (System.currentTimeMillis() - lastPing > 20000) { // 20 segundos
-                    out.write(0);
-                    out.flush();
-                    lastPing = System.currentTimeMillis();
                 }
             }
 

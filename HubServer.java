@@ -1,110 +1,72 @@
 import java.io.*;
 import java.net.*;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class HubServer {
 
-    // 1x1 por sala
-    private static final Map<String, Socket> clients   = new ConcurrentHashMap<>();
-    private static final Map<String, Socket> receptors = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Socket> clients   = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Socket> receptors = new ConcurrentHashMap<>();
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         int port = 8080;
+        System.out.println("HubServer iniciado na porta " + port);
 
-        try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("HubServer online na porta " + port);
+        ServerSocket server = new ServerSocket(port);
 
-            while (true) {
-                Socket socket = serverSocket.accept();
-                new Thread(() -> handle(socket)).start();
-            }
-
-        } catch (IOException e) {
-            e.printStackTrace();
+        while (true) {
+            Socket socket = server.accept();
+            new Thread(() -> handle(socket)).start();
         }
     }
 
     private static void handle(Socket socket) {
-        String roomId = null;
-        String role   = null;
+        String role = null;
+        String room = null;
 
         try {
-            DataInputStream in  = new DataInputStream(socket.getInputStream());
+            socket.setSoTimeout(30000);
+            socket.setKeepAlive(true);
+            socket.setTcpNoDelay(true);
+
+            DataInputStream in = new DataInputStream(socket.getInputStream());
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
 
-            socket.setSoTimeout(30000);
-            socket.setTcpNoDelay(true);
-            socket.setReceiveBufferSize(256 * 1024);
-            socket.setKeepAlive(true);
+            // Handshake
+            String command = in.readUTF();
+            String[] parts = command.split(";");
 
-            // 1) Pedido de lista de salas
-            String first = in.readUTF();
-
-            if ("LIST_ROOMS".equals(first)) {
-                Set<String> rooms = receptors.keySet();
-
-                out.writeInt(rooms.size());
-                for (String room : rooms) {
-                    out.writeUTF(room);
-                }
-
-                out.flush();
-                socket.close();
-                return;
+            for (String p : parts) {
+                if (p.startsWith("ROLE:")) role = p.substring(5);
+                if (p.startsWith("ROOM:")) room = p.substring(5);
             }
 
-        
-            // 2) Registro: ROLE:CLIENT;ROOM:X
-            String[] parts = first.split(";");
-            for (String s : parts) {
-                if (s.startsWith("ROLE:")) role = s.substring(5);
-                if (s.startsWith("ROOM:")) roomId = s.substring(5);
-            }
-
-            if (role == null || roomId == null) {
+            if (role == null || room == null) {
                 out.writeUTF("REJECT");
                 socket.close();
                 return;
             }
 
-            // 3) Controle de salas
             if (role.equals("RECEPTOR")) {
 
-                // LIMPA RECEPTOR MORTO
-                if (receptors.containsKey(roomId)) {
-                    Socket old = receptors.get(roomId);
-                    if (old == null || old.isClosed() || !old.isConnected()) {
-                        receptors.remove(roomId);
-                    }
-                }
-
-                // SE AINDA EXISTE → ROOM_EXISTS
-                if (receptors.containsKey(roomId)) {
+                Socket old = receptors.get(room);
+                if (old != null && old.isConnected() && !old.isClosed()) {
                     out.writeUTF("ROOM_EXISTS");
                     socket.close();
                     return;
                 }
 
-                receptors.put(roomId, socket);
+                receptors.put(room, socket);
             }
             else if (role.equals("CLIENT")) {
 
-                // LIMPA CLIENTE MORTO
-                if (clients.containsKey(roomId) && clients.get(roomId).isClosed()) {
-                    clients.remove(roomId);
-                }
-
-                // SE AINDA EXISTE CLIENTE VIVO → ROOM_FULL
-                if (clients.containsKey(roomId)) {
+                Socket old = clients.get(room);
+                if (old != null && old.isConnected() && !old.isClosed()) {
                     out.writeUTF("ROOM_FULL");
                     socket.close();
                     return;
                 }
 
-                // REGISTRA NOVO CLIENT
-                clients.put(roomId, socket);
+                clients.put(room, socket);
             }
             else {
                 out.writeUTF("REJECT");
@@ -112,49 +74,55 @@ public class HubServer {
                 return;
             }
 
-            // 4) Checa se já tem par
             Socket other = role.equals("CLIENT")
-                    ? receptors.get(roomId)
-                    : clients.get(roomId);
+                    ? receptors.get(room)
+                    : clients.get(room);
 
             out.writeUTF(other != null ? "ACCEPT" : "WAIT");
             out.flush();
 
-            // 5) Ponte de dados
+            // Ponte de bytes
+            InputStream rawIn = socket.getInputStream();
             byte[] buffer = new byte[4096];
-            int count;
+            int len;
 
-            while ((count = in.read(buffer)) != -1) {
+            while ((len = rawIn.read(buffer)) != -1) {
+
                 Socket target = role.equals("CLIENT")
-                        ? receptors.get(roomId)
-                        : clients.get(roomId);
+                        ? receptors.get(room)
+                        : clients.get(room);
 
                 if (target != null && !target.isClosed()) {
                     OutputStream targetOut = target.getOutputStream();
-                    targetOut.write(buffer, 0, count);
+                    targetOut.write(buffer, 0, len);
                     targetOut.flush();
                 }
             }
 
-        } catch (Exception e) {
-            System.out.println("Erro: " + e.getMessage());
+        } catch (IOException e) {
+            System.out.println("Conexão encerrada: " + e.getMessage());
         } finally {
-            removeSocket(socket, role, roomId);
-            try { socket.close(); } catch (IOException ignored) {}
+            cleanup(socket, role, room);
         }
     }
 
-    private static void removeSocket(Socket socket, String role, String room) {
-        if (room == null || role == null) return;
+    private static void cleanup(Socket socket, String role, String room) {
 
-        if ("CLIENT".equals(role)) {
-            clients.remove(room);
+        if (room != null && role != null) {
+
+            if (role.equals("CLIENT")) {
+                clients.remove(room);
+            }
+
+            if (role.equals("RECEPTOR")) {
+                receptors.remove(room);
+            }
         }
 
-        if ("RECEPTOR".equals(role)) {
-            receptors.remove(room);
-        }
+        try {
+            if (socket != null) socket.close();
+        } catch (IOException ignored) {}
 
-        System.out.println("Removido -> " + role + " | Sala: " + room);
+        System.out.println("Socket removido -> " + role + " | Sala: " + room);
     }
 }

@@ -30,6 +30,7 @@ public class HubServer {
 
             // 1️⃣ Verifica se o cliente quer a lista de receptores
             socket.setSoTimeout(5000); // opcional: timeout de leitura inicial
+            socket.setReceiveBufferSize(256*1024);
             String firstMsg = dataIn.readUTF();
             if ("REQUEST_CONNECTED_USERS".equals(firstMsg)) {
                 dataOut.writeInt(receptors.size());

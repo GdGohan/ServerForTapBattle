@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class HubServer {
 
+    // 1x1 por sala
     private static final Map<String, Socket> clients   = new ConcurrentHashMap<>();
     private static final Map<String, Socket> receptors = new ConcurrentHashMap<>();
 
@@ -13,7 +14,7 @@ public class HubServer {
         int port = 8080;
 
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("HubServer ONLINE na porta " + port);
+            System.out.println("HubServer online na porta " + port);
 
             while (true) {
                 Socket socket = serverSocket.accept();
@@ -33,17 +34,19 @@ public class HubServer {
             DataInputStream in  = new DataInputStream(socket.getInputStream());
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
 
-            socket.setSoTimeout(5000);
-            socket.setReceiveBufferSize(256*1024);
+            socket.setSoTimeout(8000);
+            socket.setReceiveBufferSize(256 * 1024);
 
-            // 1) Pedido da lista de salas
+            // 1) Pedido de lista de salas
             String first = in.readUTF();
+
             if ("LIST_ROOMS".equals(first)) {
                 Set<String> rooms = receptors.keySet();
 
                 out.writeInt(rooms.size());
-                for (String room : rooms)
+                for (String room : rooms) {
                     out.writeUTF(room);
+                }
 
                 out.flush();
                 socket.close();
@@ -65,34 +68,50 @@ public class HubServer {
                 return;
             }
 
-            if (role.equals("CLIENT"))
-                clients.put(roomId, socket);
-            else if (role.equals("RECEPTOR"))
+            // 3) Controle de salas
+            if (role.equals("RECEPTOR")) {
+                if (receptors.containsKey(roomId)) {
+                    out.writeUTF("ROOM_EXISTS");
+                    socket.close();
+                    return;
+                }
                 receptors.put(roomId, socket);
+            } 
+            else if (role.equals("CLIENT")) {
+                if (clients.containsKey(roomId)) {
+                    out.writeUTF("ROOM_FULL");
+                    socket.close();
+                    return;
+                }
+                clients.put(roomId, socket);
+            } 
             else {
                 out.writeUTF("REJECT");
                 socket.close();
                 return;
             }
 
-            // 3) Verificação do par
-            Socket other = role.equals("CLIENT") ? receptors.get(roomId)
-                                                 : clients.get(roomId);
+            // 4) Checa se já tem par
+            Socket other = role.equals("CLIENT")
+                    ? receptors.get(roomId)
+                    : clients.get(roomId);
 
             out.writeUTF(other != null ? "ACCEPT" : "WAIT");
             out.flush();
 
-            // 4) Encaminhamento de dados
+            // 5) Ponte de dados
             byte[] buffer = new byte[4096];
             int count;
 
             while ((count = in.read(buffer)) != -1) {
-                Socket target = role.equals("CLIENT") ? receptors.get(roomId)
-                                                       : clients.get(roomId);
+                Socket target = role.equals("CLIENT")
+                        ? receptors.get(roomId)
+                        : clients.get(roomId);
 
                 if (target != null && !target.isClosed()) {
-                    target.getOutputStream().write(buffer, 0, count);
-                    target.getOutputStream().flush();
+                    OutputStream targetOut = target.getOutputStream();
+                    targetOut.write(buffer, 0, count);
+                    targetOut.flush();
                 }
             }
 
@@ -105,14 +124,16 @@ public class HubServer {
     }
 
     private static void removeSocket(Socket socket, String role, String room) {
-        if (room == null) return;
+        if (room == null || role == null) return;
 
-        if ("CLIENT".equals(role))
+        if ("CLIENT".equals(role)) {
             clients.remove(room);
+        }
 
-        if ("RECEPTOR".equals(role))
+        if ("RECEPTOR".equals(role)) {
             receptors.remove(room);
+        }
 
-        System.out.println("Removido: " + role + " - Sala: " + room);
+        System.out.println("Removido -> " + role + " | Sala: " + room);
     }
 }

@@ -46,8 +46,6 @@ public class HubServer {
 
             // 2️⃣ Lê header normal ROLE/ROOM
             String header = dataIn.readUTF();
-
-            String header = new String(headerBuf, 0, headerLen).trim();
             String role = null;
             String roomId = null;
             String[] parts = header.split(";");

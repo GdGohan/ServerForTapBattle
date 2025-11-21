@@ -55,8 +55,7 @@ public class HubServer {
                 return;
             }
 
-            socket.setSoTimeout(0);
-
+        
             // 2) Registro: ROLE:CLIENT;ROOM:X
             String[] parts = first.split(";");
             for (String s : parts) {
@@ -137,7 +136,7 @@ public class HubServer {
                     targetOut.flush();
                 }
                 if (System.currentTimeMillis() - lastPing > 20000) { // 20 segundos
-                    out.writeUTF("__ping__");   // envia ping
+                    out.write(0);
                     out.flush();
                     lastPing = System.currentTimeMillis();
                 }
